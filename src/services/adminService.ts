@@ -250,6 +250,73 @@ export const technicalFeedbackService = {
   }
 };
 
+// Challenge Management
+export const challengeService = {
+  async getAll() {
+    const { data, error } = await supabase
+      .from('challenges')
+      .select(`
+        *,
+        challenge_results (
+          result_id,
+          candidate_id,
+          score,
+          max_score,
+          feedback,
+          submitted_at,
+          graded_at,
+          graded_by,
+          candidates (
+            candidate_id,
+            full_name,
+            email
+          )
+        )
+      `)
+      .order('date_assigned', { ascending: false });
+
+    if (error) throw error;
+    return data;
+  },
+
+  async create(challenge: Tables['challenges']['Insert']) {
+    const { data, error } = await supabase
+      .from('challenges')
+      .insert(challenge)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id: string, updates: Tables['challenges']['Update']) {
+    const { data, error } = await supabase
+      .from('challenges')
+      .update(updates)
+      .eq('challenge_id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async delete(id: string) {
+    const { error } = await supabase
+      .from('challenges')
+      .delete()
+      .eq('challenge_id', id);
+
+    if (error) throw error;
+  }
+};
+
+// Hook to get challenges with results
+export function useChallengesWithResults() {
+  return challengeService.getAll();
+}
+
 // Exam Management
 export const examService = {
   async getAll() {
@@ -584,6 +651,107 @@ export const certificateService = {
   }
 };
 
+// Improved CSV parsing function
+function parseCSV(text: string): any[] {
+  const lines = text.split(/\r?\n/).filter(line => line.trim());
+  if (lines.length === 0) {
+    throw new Error('CSV file is empty');
+  }
+
+  const result: any[] = [];
+  const headers = parseCSVLine(lines[0]);
+  
+  if (headers.length === 0) {
+    throw new Error('CSV file has no headers');
+  }
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue; // Skip empty lines
+    
+    try {
+      const values = parseCSVLine(line);
+      const row: any = {};
+      
+      headers.forEach((header, index) => {
+        row[header] = values[index] || '';
+      });
+      
+      result.push(row);
+    } catch (error) {
+      throw new Error(`Error parsing line ${i + 1}: ${error instanceof Error ? error.message : 'Invalid format'}`);
+    }
+  }
+
+  return result;
+}
+
+// Parse a single CSV line handling quoted fields and escaped quotes
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < line.length) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // Escaped quote
+        current += '"';
+        i += 2;
+      } else {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+        i++;
+      }
+    } else if (char === ',' && !inQuotes) {
+      // Field separator
+      result.push(current.trim());
+      current = '';
+      i++;
+    } else {
+      current += char;
+      i++;
+    }
+  }
+
+  // Add the last field
+  result.push(current.trim());
+  
+  return result;
+}
+
+// Validation functions
+function validateEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
+function validateDate(dateString: string): boolean {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  return !isNaN(date.getTime());
+}
+
+function validateInteger(value: string): boolean {
+  return !isNaN(parseInt(value)) && isFinite(parseInt(value));
+}
+
+function validateSkillLevel(skillLevel: string): boolean {
+  return ['beginner', 'intermediate', 'advanced'].includes(skillLevel.toLowerCase());
+}
+
+function validateSurveyType(surveyType: string): boolean {
+  return ['leadership', 'collaboration', 'technical', 'overall', 'challenge', 'rating'].includes(surveyType.toLowerCase());
+}
+
+function validateResultStatus(status: string): boolean {
+  return ['pending', 'passed', 'failed'].includes(status.toLowerCase());
+}
+
 // Import Service
 export const importService = {
   async previewFile(file: File, importType: string): Promise<any[]> {
@@ -592,25 +760,17 @@ export const importService = {
       reader.onload = (e) => {
         try {
           const text = e.target?.result as string;
-          const lines = text.split('\n').filter(line => line.trim());
-          if (lines.length === 0) {
-            reject(new Error('File is empty'));
+          const data = parseCSV(text);
+          
+          if (data.length === 0) {
+            reject(new Error('CSV file contains no data rows'));
             return;
           }
 
-          const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-          const preview = lines.slice(1, 6).map(line => {
-            const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-            const row: any = {};
-            headers.forEach((header, index) => {
-              row[header] = values[index] || '';
-            });
-            return row;
-          });
-
-          resolve(preview);
+          // Return first 5 rows for preview
+          resolve(data.slice(0, 5));
         } catch (error) {
-          reject(new Error('Failed to parse file'));
+          reject(new Error(`Failed to parse CSV file: ${error instanceof Error ? error.message : 'Unknown error'}`));
         }
       };
       reader.onerror = () => reject(new Error('Failed to read file'));
@@ -618,28 +778,33 @@ export const importService = {
     });
   },
 
-  async importData(file: File, importType: string): Promise<{ imported: number; errors: number }> {
+  async importData(file: File, importType: string): Promise<{ imported: number; errors: number; errorDetails: string[] }> {
     const data = await this.parseFile(file);
     let imported = 0;
     let errors = 0;
+    const errorDetails: string[] = [];
 
-    for (const row of data) {
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const rowNumber = i + 2; // +2 because we skip header and arrays are 0-indexed
+      
       try {
         if (importType === 'candidates') {
-          await this.importCandidate(row);
+          await this.importCandidate(row, rowNumber);
         } else if (importType === 'exam_results') {
-          await this.importExamResult(row);
+          await this.importExamResult(row, rowNumber);
         } else if (importType === 'survey_responses') {
-          await this.importSurveyResponse(row);
+          await this.importSurveyResponse(row, rowNumber);
         }
         imported++;
       } catch (error) {
-        console.error('Import error:', error);
         errors++;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        errorDetails.push(`Row ${rowNumber}: ${errorMessage}`);
       }
     }
 
-    return { imported, errors };
+    return { imported, errors, errorDetails };
   },
 
   async parseFile(file: File): Promise<any[]> {
@@ -648,53 +813,96 @@ export const importService = {
       reader.onload = (e) => {
         try {
           const text = e.target?.result as string;
-          const lines = text.split('\n').filter(line => line.trim());
-          const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-          const data = lines.slice(1).map(line => {
-            const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-            const row: any = {};
-            headers.forEach((header, index) => {
-              row[header] = values[index] || '';
-            });
-            return row;
-          });
+          const data = parseCSV(text);
           resolve(data);
         } catch (error) {
-          reject(new Error('Failed to parse file'));
+          reject(new Error(`Failed to parse CSV file: ${error instanceof Error ? error.message : 'Unknown error'}`));
         }
       };
+      reader.onerror = () => reject(new Error('Failed to read file'));
       reader.readAsText(file);
     });
   },
 
-  async importCandidate(row: any) {
+  async importCandidate(row: any, rowNumber: number) {
+    // Validate required fields
+    if (!row.full_name || !row.full_name.trim()) {
+      throw new Error('Missing required field: full_name');
+    }
+    
+    if (!row.email || !row.email.trim()) {
+      throw new Error('Missing required field: email');
+    }
+    
+    if (!validateEmail(row.email)) {
+      throw new Error(`Invalid email format: ${row.email}`);
+    }
+
+    // Validate optional fields
+    if (row.skill_level && !validateSkillLevel(row.skill_level)) {
+      throw new Error(`Invalid skill_level: ${row.skill_level}. Must be one of: beginner, intermediate, advanced`);
+    }
+
     const candidateData: Tables['candidates']['Insert'] = {
-      full_name: row.full_name,
-      email: row.email,
-      phone: row.phone || null,
-      linkedin_url: row.linkedin_url || null,
-      github_url: row.github_url || null,
-      portfolio_url: row.portfolio_url || null,
-      resume_url: row.resume_url || null,
-      photo_url: row.photo_url || null,
-      role: row.role || null,
-      skill_level: row.skill_level || null,
-      is_public: row.is_public === 'true' || row.is_public === '1'
+      full_name: row.full_name.trim(),
+      email: row.email.trim().toLowerCase(),
+      phone: row.phone?.trim() || null,
+      linkedin_url: row.linkedin_url?.trim() || null,
+      github_url: row.github_url?.trim() || null,
+      portfolio_url: row.portfolio_url?.trim() || null,
+      resume_url: row.resume_url?.trim() || null,
+      photo_url: row.photo_url?.trim() || null,
+      role: row.role?.trim() || null,
+      skill_level: row.skill_level?.toLowerCase() || null,
+      is_public: row.is_public === 'true' || row.is_public === '1' || row.is_public === 'TRUE'
     };
 
-    await candidateService.create(candidateData);
+    try {
+      await candidateService.create(candidateData);
+    } catch (error: any) {
+      if (error.code === '23505') { // Unique constraint violation
+        throw new Error(`Email already exists: ${row.email}`);
+      }
+      throw new Error(`Database error: ${error.message}`);
+    }
   },
 
-  async importExamResult(row: any) {
+  async importExamResult(row: any, rowNumber: number) {
+    // Validate required fields
+    if (!row.candidate_email || !row.candidate_email.trim()) {
+      throw new Error('Missing required field: candidate_email');
+    }
+    
+    if (!row.exam_title || !row.exam_title.trim()) {
+      throw new Error('Missing required field: exam_title');
+    }
+    
+    if (!row.score || !validateInteger(row.score)) {
+      throw new Error(`Invalid score: ${row.score}. Must be a valid integer`);
+    }
+    
+    if (!row.result_date || !validateDate(row.result_date)) {
+      throw new Error(`Invalid result_date: ${row.result_date}. Must be a valid date (YYYY-MM-DD)`);
+    }
+
+    // Validate optional fields
+    if (row.max_score && !validateInteger(row.max_score)) {
+      throw new Error(`Invalid max_score: ${row.max_score}. Must be a valid integer`);
+    }
+    
+    if (row.result_status && !validateResultStatus(row.result_status)) {
+      throw new Error(`Invalid result_status: ${row.result_status}. Must be one of: pending, passed, failed`);
+    }
+
     // Find candidate by email
-    const { data: candidates } = await supabase
+    const { data: candidates, error: candidateError } = await supabase
       .from('candidates')
       .select('candidate_id')
-      .eq('email', row.candidate_email)
+      .eq('email', row.candidate_email.trim().toLowerCase())
       .single();
 
-    if (!candidates) {
-      throw new Error(`Candidate not found: ${row.candidate_email}`);
+    if (candidateError || !candidates) {
+      throw new Error(`Candidate not found with email: ${row.candidate_email}`);
     }
 
     // Create or find exam
@@ -702,88 +910,136 @@ export const importService = {
     const { data: existingExam } = await supabase
       .from('exams')
       .select('exam_id')
-      .eq('title', row.exam_title)
+      .eq('title', row.exam_title.trim())
       .single();
 
     if (existingExam) {
       exam = existingExam;
     } else {
-      const { data: newExam } = await supabase
-        .from('exams')
-        .insert({
-          title: row.exam_title,
-          exam_date: row.result_date,
-          max_score: parseInt(row.max_score) || 100
-        })
-        .select('exam_id')
-        .single();
-      exam = newExam;
+      try {
+        const { data: newExam, error: examError } = await supabase
+          .from('exams')
+          .insert({
+            title: row.exam_title.trim(),
+            exam_date: row.result_date,
+            max_score: parseInt(row.max_score) || 100
+          })
+          .select('exam_id')
+          .single();
+        
+        if (examError) throw examError;
+        exam = newExam;
+      } catch (error: any) {
+        throw new Error(`Failed to create exam: ${error.message}`);
+      }
     }
 
     // Create exam result
-    await examService.addResult({
-      candidate_id: candidates.candidate_id,
-      exam_id: exam.exam_id,
-      score: parseInt(row.score),
-      max_score: parseInt(row.max_score) || 100,
-      result_status: row.result_status || 'completed',
-      result_date: row.result_date,
-      feedback: row.feedback || null
-    });
+    try {
+      await examService.addResult({
+        candidate_id: candidates.candidate_id,
+        exam_id: exam.exam_id,
+        score: parseInt(row.score),
+        max_score: parseInt(row.max_score) || 100,
+        result_status: row.result_status?.toLowerCase() || 'pending',
+        result_date: row.result_date,
+        feedback: row.feedback?.trim() || null
+      });
+    } catch (error: any) {
+      throw new Error(`Failed to create exam result: ${error.message}`);
+    }
   },
 
-  async importSurveyResponse(row: any) {
+  async importSurveyResponse(row: any, rowNumber: number) {
+    // Validate required fields
+    if (!row.candidate_email || !row.candidate_email.trim()) {
+      throw new Error('Missing required field: candidate_email');
+    }
+    
+    if (!row.survey_type || !row.survey_type.trim()) {
+      throw new Error('Missing required field: survey_type');
+    }
+    
+    if (!row.rating || !validateInteger(row.rating)) {
+      throw new Error(`Invalid rating: ${row.rating}. Must be a valid integer`);
+    }
+
+    // Validate field values
+    if (!validateSurveyType(row.survey_type)) {
+      throw new Error(`Invalid survey_type: ${row.survey_type}. Must be one of: leadership, collaboration, technical, overall, challenge, rating`);
+    }
+
+    const rating = parseInt(row.rating);
+    if (rating < 1 || rating > 5) {
+      throw new Error(`Invalid rating: ${rating}. Must be between 1 and 5`);
+    }
+
+    if (row.submitted_at && !validateDate(row.submitted_at)) {
+      throw new Error(`Invalid submitted_at: ${row.submitted_at}. Must be a valid date`);
+    }
+
     // Find candidate by email
-    const { data: candidates } = await supabase
+    const { data: candidates, error: candidateError } = await supabase
       .from('candidates')
       .select('candidate_id')
-      .eq('email', row.candidate_email)
+      .eq('email', row.candidate_email.trim().toLowerCase())
       .single();
 
-    if (!candidates) {
-      throw new Error(`Candidate not found: ${row.candidate_email}`);
+    if (candidateError || !candidates) {
+      throw new Error(`Candidate not found with email: ${row.candidate_email}`);
     }
 
     // Create or find survey
     let survey;
-    const surveyTitle = `${row.survey_type} Survey`;
+    const surveyTitle = `${row.survey_type.trim()} Survey`;
     const { data: existingSurvey } = await supabase
       .from('surveys')
       .select('survey_id')
       .eq('title', surveyTitle)
+      .eq('survey_type', row.survey_type.trim().toLowerCase())
       .single();
 
     if (existingSurvey) {
       survey = existingSurvey;
     } else {
-      const { data: newSurvey } = await supabase
-        .from('surveys')
-        .insert({
-          title: surveyTitle,
-          survey_type: row.survey_type,
-          max_rating: 5
-        })
-        .select('survey_id')
-        .single();
-      survey = newSurvey;
+      try {
+        const { data: newSurvey, error: surveyError } = await supabase
+          .from('surveys')
+          .insert({
+            title: surveyTitle,
+            survey_type: row.survey_type.trim().toLowerCase(),
+            max_rating: 5
+          })
+          .select('survey_id')
+          .single();
+        
+        if (surveyError) throw surveyError;
+        survey = newSurvey;
+      } catch (error: any) {
+        throw new Error(`Failed to create survey: ${error.message}`);
+      }
     }
 
     // Create survey response
-    await surveyService.addResponse({
-      candidate_id: candidates.candidate_id,
-      survey_id: survey.survey_id,
-      rating: parseInt(row.rating),
-      feedback: row.feedback || null,
-      reviewer_name: row.reviewer_name || null,
-      submitted_at: row.submitted_at || new Date().toISOString()
-    });
+    try {
+      await surveyService.addResponse({
+        candidate_id: candidates.candidate_id,
+        survey_id: survey.survey_id,
+        rating: rating,
+        feedback: row.feedback?.trim() || null,
+        reviewer_name: row.reviewer_name?.trim() || null,
+        submitted_at: row.submitted_at || new Date().toISOString()
+      });
+    } catch (error: any) {
+      throw new Error(`Failed to create survey response: ${error.message}`);
+    }
   },
 
   generateTemplate(importType: string): string {
     const templates = {
-      candidates: 'full_name,email,phone,linkedin_url,github_url,portfolio_url,resume_url,photo_url,role,skill_level,is_public\nJohn Doe,john@example.com,+1234567890,https://linkedin.com/in/johndoe,https://github.com/johndoe,https://johndoe.dev,https://example.com/resume.pdf,https://example.com/photo.jpg,Full-Stack Developer,intermediate,true',
-      exam_results: 'candidate_email,exam_title,score,max_score,result_status,result_date,feedback\njohn@example.com,Final Technical Exam,85,100,passed,2025-01-15,Excellent performance',
-      survey_responses: 'candidate_email,survey_type,rating,feedback,reviewer_name,submitted_at\njohn@example.com,technical,4,Great technical skills,Jane Smith,2025-01-15T10:00:00Z'
+      candidates: 'full_name,email,phone,linkedin_url,github_url,portfolio_url,resume_url,photo_url,role,skill_level,is_public\n"John Doe","john@example.com","+1234567890","https://linkedin.com/in/johndoe","https://github.com/johndoe","https://johndoe.dev","https://example.com/resume.pdf","https://example.com/photo.jpg","Full-Stack Developer","intermediate","true"',
+      exam_results: 'candidate_email,exam_title,score,max_score,result_status,result_date,feedback\n"john@example.com","Final Technical Exam","85","100","passed","2025-01-15","Excellent performance"',
+      survey_responses: 'candidate_email,survey_type,rating,feedback,reviewer_name,submitted_at\n"john@example.com","technical","4","Great technical skills","Jane Smith","2025-01-15T10:00:00Z"'
     };
 
     return templates[importType as keyof typeof templates] || '';
@@ -817,6 +1073,11 @@ export const dataService = {
   async exportExams() {
     const exams = await examService.getAll();
     return this.convertToCSV(exams, 'exams');
+  },
+
+  async exportChallenges() {
+    const challenges = await challengeService.getAll();
+    return this.convertToCSV(challenges, 'challenges');
   },
 
   async exportSurveys() {

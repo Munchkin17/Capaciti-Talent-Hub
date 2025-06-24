@@ -7,12 +7,19 @@ interface ImportDataModalProps {
   onImportComplete: () => void;
 }
 
+interface ImportResult {
+  imported: number;
+  errors: number;
+  errorDetails: string[];
+}
+
 export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImportComplete }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importType, setImportType] = useState<'candidates' | 'exam_results' | 'survey_responses'>('candidates');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -40,13 +47,24 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      if (!file.name.match(/\.(xlsx?|csv)$/i)) {
-        setError('Please select an Excel (.xlsx, .xls) or CSV file');
+      // Check if file is CSV
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        setError('Please select a CSV file only. Excel files (.xlsx, .xls) are not supported. Please convert your file to CSV format first.');
+        setSelectedFile(null);
         return;
       }
+
+      // Check file size (limit to 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError('File size must be less than 10MB. Please reduce the file size and try again.');
+        setSelectedFile(null);
+        return;
+      }
+
       setSelectedFile(file);
       setError(null);
       setSuccess(null);
+      setImportResult(null);
       setShowPreview(false);
     }
   };
@@ -62,7 +80,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
       setPreviewData(preview);
       setShowPreview(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to preview file');
+      setError(err instanceof Error ? err.message : 'Failed to preview file. Please check that your CSV file is properly formatted.');
     } finally {
       setLoading(false);
     }
@@ -73,18 +91,29 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
 
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       const result = await importService.importData(selectedFile, importType);
-      setSuccess(`Successfully imported ${result.imported} records. ${result.errors} errors.`);
-      onImportComplete();
+      setImportResult(result);
       
-      // Auto-close after successful import
-      setTimeout(() => {
-        onClose();
-      }, 2000);
+      if (result.imported > 0) {
+        setSuccess(`Successfully imported ${result.imported} record${result.imported !== 1 ? 's' : ''}.`);
+        onImportComplete();
+      }
+      
+      if (result.errors > 0) {
+        setError(`${result.errors} record${result.errors !== 1 ? 's' : ''} failed to import. See details below.`);
+      }
+      
+      if (result.imported > 0 && result.errors === 0) {
+        // Auto-close after successful import with no errors
+        setTimeout(() => {
+          onClose();
+        }, 2000);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to import data');
+      setError(err instanceof Error ? err.message : 'Failed to import data. Please check your file format and try again.');
     } finally {
       setLoading(false);
     }
@@ -117,9 +146,26 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
 
         <div className="p-8 space-y-6">
           {error && (
-            <div className="bg-error-50 border border-error-200 text-error-700 px-4 py-3 rounded-lg flex items-center space-x-2">
-              <AlertCircle className="w-5 h-5" />
-              <span>{error}</span>
+            <div className="bg-error-50 border border-error-200 text-error-700 px-4 py-3 rounded-lg">
+              <div className="flex items-start space-x-2">
+                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="font-medium">{error}</div>
+                  {importResult && importResult.errorDetails.length > 0 && (
+                    <div className="mt-2">
+                      <div className="text-sm font-medium mb-1">Error Details:</div>
+                      <ul className="text-sm space-y-1 max-h-32 overflow-y-auto">
+                        {importResult.errorDetails.slice(0, 10).map((detail, index) => (
+                          <li key={index} className="text-error-600">• {detail}</li>
+                        ))}
+                        {importResult.errorDetails.length > 10 && (
+                          <li className="text-error-500 italic">... and {importResult.errorDetails.length - 10} more errors</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -157,7 +203,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
           <div className="bg-neutral-50 rounded-lg p-4 border border-neutral-200">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-semibold text-primary-900 mb-1">Download Template</h3>
+                <h3 className="font-semibold text-primary-900 mb-1">Download CSV Template</h3>
                 <p className="text-sm text-neutral-600">
                   Download a CSV template with the correct column structure for {currentType.label.toLowerCase()}
                 </p>
@@ -204,12 +250,12 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
           {/* File Upload */}
           <div>
             <label className="block text-sm font-medium text-neutral-700 mb-3">
-              Select File to Import
+              Select CSV File to Import
             </label>
             <div className="border-2 border-dashed border-neutral-300 rounded-lg p-8 text-center hover:border-neutral-400 transition-colors">
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".csv"
                 onChange={handleFileSelect}
                 className="hidden"
                 id="file-upload"
@@ -217,10 +263,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
               <label htmlFor="file-upload" className="cursor-pointer">
                 <FileText className="mx-auto h-12 w-12 text-neutral-400 mb-4" />
                 <p className="text-lg font-medium text-neutral-900 mb-2">
-                  {selectedFile ? selectedFile.name : 'Choose a file to upload'}
+                  {selectedFile ? selectedFile.name : 'Choose a CSV file to upload'}
                 </p>
                 <p className="text-sm text-neutral-600">
-                  Supports Excel (.xlsx, .xls) and CSV files
+                  Only CSV files are supported. Maximum file size: 10MB
                 </p>
               </label>
             </div>
@@ -278,6 +324,23 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ onClose, onImp
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* Import Results Summary */}
+          {importResult && (
+            <div className="bg-neutral-50 rounded-lg p-4 border border-neutral-200">
+              <h3 className="font-semibold text-primary-900 mb-3">Import Summary</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="text-center p-3 bg-success-100 rounded-lg">
+                  <div className="text-2xl font-bold text-success-700">{importResult.imported}</div>
+                  <div className="text-sm text-success-600">Successfully Imported</div>
+                </div>
+                <div className="text-center p-3 bg-error-100 rounded-lg">
+                  <div className="text-2xl font-bold text-error-700">{importResult.errors}</div>
+                  <div className="text-sm text-error-600">Failed to Import</div>
+                </div>
               </div>
             </div>
           )}
