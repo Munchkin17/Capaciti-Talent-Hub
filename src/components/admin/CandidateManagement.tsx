@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, Eye, Users, Sparkles, Download, Upload, MessageSquare } from 'lucide-react';
+import { Plus, Search, Filter, Edit, Trash2, Eye, Users, Sparkles, Download, Upload, MessageSquare, UserPlus } from 'lucide-react';
 import { useCandidatesWithCohorts } from '../../hooks/useSupabaseData';
 import { candidateService, dataService } from '../../services/adminService';
 import { CandidateForm } from './forms/CandidateForm';
 import { TechnicalFeedbackModal } from './TechnicalFeedbackModal';
+import { CohortAssignmentModal } from './CohortAssignmentModal';
 import { ImportDataModal } from './ImportDataModal';
 import { format } from 'date-fns';
 
@@ -12,7 +13,9 @@ export const CandidateManagement: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [showCohortModal, setShowCohortModal] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<any>(null);
   const [editingCandidate, setEditingCandidate] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterPublic, setFilterPublic] = useState<'all' | 'public' | 'private'>('all');
@@ -69,6 +72,11 @@ export const CandidateManagement: React.FC = () => {
   const handleTechnicalFeedback = (candidateId: string) => {
     setSelectedCandidateId(candidateId);
     setShowFeedbackModal(true);
+  };
+
+  const handleCohortAssignment = (candidate: any) => {
+    setSelectedCandidate(candidate);
+    setShowCohortModal(true);
   };
 
   const handleFormClose = () => {
@@ -335,6 +343,13 @@ export const CandidateManagement: React.FC = () => {
                   <td className="py-4 px-6">
                     <div className="flex items-center justify-end space-x-2">
                       <button
+                        onClick={() => handleCohortAssignment(candidate)}
+                        className="p-2 text-accent-600 hover:bg-accent-50 rounded-lg transition-colors"
+                        title="Manage Cohort Assignment"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                      </button>
+                      <button
                         onClick={() => handleTechnicalFeedback(candidate.candidate_id)}
                         className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
                         title="Technical Feedback"
@@ -417,6 +432,21 @@ export const CandidateManagement: React.FC = () => {
           onClose={() => {
             setShowFeedbackModal(false);
             setSelectedCandidateId(null);
+          }}
+        />
+      )}
+
+      {showCohortModal && selectedCandidate && (
+        <CohortAssignmentModal
+          candidate={selectedCandidate}
+          onClose={() => {
+            setShowCohortModal(false);
+            setSelectedCandidate(null);
+          }}
+          onSave={() => {
+            refetch();
+            setShowCohortModal(false);
+            setSelectedCandidate(null);
           }}
         />
       )}

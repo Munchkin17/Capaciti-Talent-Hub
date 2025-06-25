@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, BarChart3, Settings, LogOut, Calendar, Users } from 'lucide-react';
+import { User, BarChart3, Settings, LogOut, Calendar, Users, MessageSquare } from 'lucide-react';
 
 interface AdminHeaderProps {
   currentView: string;
@@ -12,6 +12,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ currentView, onViewCha
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
     { id: 'candidates', label: 'Candidates', icon: User },
     { id: 'cohorts', label: 'Cohorts', icon: Calendar },
+    { id: 'feedback', label: 'Tech Feedback', icon: MessageSquare },
     { id: 'admin', label: 'Settings', icon: Settings },
   ];
 
@@ -64,7 +65,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ currentView, onViewCha
                 <User className="w-5 h-5 text-primary-700" />
               </div>
               <div className="hidden sm:block">
-                <span className="text-sm font-medium text-primary-900">Admin User</span>
+                <span className="text-sm font-medium text-primary-900">Tech Mentor</span>
                 <p className="text-xs text-neutral-600">Administrator</p>
               </div>
             </div>

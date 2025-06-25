@@ -201,6 +201,17 @@ export const cohortService = {
       .eq('cohort_id', id);
 
     if (error) throw error;
+  },
+
+  async findByName(cohortName: string) {
+    const { data, error } = await supabase
+      .from('cohorts')
+      .select('*')
+      .eq('cohort_name', cohortName)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
+    return data;
   }
 };
 
@@ -858,7 +869,28 @@ export const importService = {
     };
 
     try {
-      await candidateService.create(candidateData);
+      const newCandidate = await candidateService.create(candidateData);
+      
+      // Handle cohort assignment if cohort_name or cohort_id is provided
+      if (row.cohort_name || row.cohort_id) {
+        let cohortId = row.cohort_id;
+        
+        // If cohort_name is provided, find the cohort by name
+        if (row.cohort_name && !cohortId) {
+          const cohort = await cohortService.findByName(row.cohort_name.trim());
+          if (cohort) {
+            cohortId = cohort.cohort_id;
+          } else {
+            throw new Error(`Cohort not found: ${row.cohort_name}`);
+          }
+        }
+        
+        // Assign candidate to cohort
+        if (cohortId) {
+          await candidateService.assignToCohort(newCandidate.candidate_id, cohortId);
+        }
+      }
+      
     } catch (error: any) {
       if (error.code === '23505') { // Unique constraint violation
         throw new Error(`Email already exists: ${row.email}`);
@@ -1037,7 +1069,7 @@ export const importService = {
 
   generateTemplate(importType: string): string {
     const templates = {
-      candidates: 'full_name,email,phone,linkedin_url,github_url,portfolio_url,resume_url,photo_url,role,skill_level,is_public\n"John Doe","john@example.com","+1234567890","https://linkedin.com/in/johndoe","https://github.com/johndoe","https://johndoe.dev","https://example.com/resume.pdf","https://example.com/photo.jpg","Full-Stack Developer","intermediate","true"',
+      candidates: 'full_name,email,phone,linkedin_url,github_url,portfolio_url,resume_url,photo_url,role,skill_level,is_public,cohort_name\n"John Doe","john@example.com","+1234567890","https://linkedin.com/in/johndoe","https://github.com/johndoe","https://johndoe.dev","https://example.com/resume.pdf","https://example.com/photo.jpg","Full-Stack Developer","intermediate","true","Tech Accelerator 2025-Q1"',
       exam_results: 'candidate_email,exam_title,score,max_score,result_status,result_date,feedback\n"john@example.com","Final Technical Exam","85","100","passed","2025-01-15","Excellent performance"',
       survey_responses: 'candidate_email,survey_type,rating,feedback,reviewer_name,submitted_at\n"john@example.com","technical","4","Great technical skills","Jane Smith","2025-01-15T10:00:00Z"'
     };

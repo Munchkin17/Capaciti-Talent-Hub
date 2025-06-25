@@ -3,6 +3,7 @@ import { AdminHeader } from './AdminHeader';
 import { Dashboard } from '../Dashboard';
 import { CandidateManagement } from './CandidateManagement';
 import { CohortManagement } from './CohortManagement';
+import { TechnicalFeedbackManagement } from './TechnicalFeedbackManagement';
 import { AdminPanel } from '../AdminPanel';
 
 interface AdminAppProps {
@@ -20,6 +21,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogout }) => {
         return <CandidateManagement />;
       case 'cohorts':
         return <CohortManagement />;
+      case 'feedback':
+        return <TechnicalFeedbackManagement />;
       case 'admin':
         return <AdminPanel />;
       default:

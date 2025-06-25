@@ -10,7 +10,8 @@ import {
   Download,
   Globe,
   Mail,
-  Clock
+  Clock,
+  MessageSquare
 } from 'lucide-react';
 import { CandidateProfile as CandidateProfileType } from '../../types';
 import { format } from 'date-fns';
@@ -23,6 +24,30 @@ interface PublicCandidateProfileProps {
 }
 
 export const PublicCandidateProfile: React.FC<PublicCandidateProfileProps> = ({ profile, onBack }) => {
+  const [technicalFeedback, setTechnicalFeedback] = React.useState<any[]>([]);
+  const [loadingFeedback, setLoadingFeedback] = React.useState(true);
+
+  React.useEffect(() => {
+    loadTechnicalFeedback();
+  }, [profile.id]);
+
+  const loadTechnicalFeedback = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('technical_feedback')
+        .select('*')
+        .eq('candidate_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setTechnicalFeedback(data || []);
+    } catch (err) {
+      console.error('Error loading technical feedback:', err);
+    } finally {
+      setLoadingFeedback(false);
+    }
+  };
+
   const passedExams = profile.exams.filter(exam => exam.result === 'Passed');
   const avgChallengeScore = profile.challengeResults.length > 0 
     ? Math.round(profile.challengeResults.reduce((sum, cr) => sum + cr.score, 0) / profile.challengeResults.length)
@@ -196,6 +221,42 @@ export const PublicCandidateProfile: React.FC<PublicCandidateProfileProps> = ({ 
           </div>
         </div>
       </div>
+
+      {/* Technical Feedback Section */}
+      {!loadingFeedback && technicalFeedback.length > 0 && (
+        <div className="bg-white rounded-2xl p-8 shadow-lg border border-neutral-200">
+          <h3 className="text-xl font-bold text-primary-900 mb-6 flex items-center space-x-2">
+            <MessageSquare className="w-6 h-6 text-secondary-600" />
+            <span>Technical Mentor Feedback</span>
+          </h3>
+          
+          <div className="space-y-6">
+            {technicalFeedback.map((feedback) => (
+              <div key={feedback.feedback_id} className="border border-neutral-200 rounded-xl p-6 bg-gradient-to-br from-neutral-50 to-white">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-primary-100 to-secondary-100 rounded-full flex items-center justify-center">
+                      <Users className="w-5 h-5 text-primary-700" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-primary-900">{feedback.mentor_name}</h4>
+                      <p className="text-sm text-neutral-600">
+                        {format(new Date(feedback.created_at), 'MMM dd, yyyy')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="prose prose-sm max-w-none">
+                  <p className="text-neutral-700 leading-relaxed whitespace-pre-wrap">
+                    {feedback.feedback_text}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Performance Chart */}
       {profile.challengeResults.length > 0 && (
