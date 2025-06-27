@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, MessageSquare, Edit, Trash2, User, Calendar, Search, Filter } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 import { useCandidatesWithCohorts } from '../../hooks/useSupabaseData';
 import { technicalFeedbackService } from '../../services/adminService';
 import { TechnicalFeedbackForm } from './forms/TechnicalFeedbackForm';

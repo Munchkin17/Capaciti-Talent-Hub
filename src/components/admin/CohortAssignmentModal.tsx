@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Users, Calendar } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 import { candidateService, cohortService } from '../../services/adminService';
 import type { Database } from '../../lib/supabase';
 

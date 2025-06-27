@@ -13,6 +13,7 @@ import {
   Clock,
   MessageSquare
 } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 import { CandidateProfile as CandidateProfileType } from '../../types';
 import { format } from 'date-fns';
 import { SkillBar } from '../SkillBar';
